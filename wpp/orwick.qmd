@@ -1,0 +1,125 @@
+---
+title: "Orwick evapotranspiration"
+format: html
+---
+
+```{r include = FALSE}
+library(ggplot2)
+
+fxs <- list.files(here::here("R"), full.names = TRUE)
+lapply(fxs, source)
+
+openet_api_key <- get_openet_api_key()
+```
+
+There are eight field associated with the Orwick acquisition.
+
+```{r}
+orwick_fields <- tibble::tribble(
+  ~field_id,  ~acres,
+  "06187633", 113.99,
+  "06187634", 13.80,
+  "06187635", 5.57,
+  "06219095", 89.63,
+  "06239974", 184.46,
+  "06239975", 31.05,
+  "06239976", 108.62,
+  "06239977", 229.10
+)
+
+orwick_fields
+```
+
+Let's pull monthly field-level ET data from 2016 to 2024.
+
+```{r message = FALSE}
+orwick_et <- openet::getOpenET_fields(
+  field_ids  = orwick_fields$field_id,
+  start_date = "2016-01-01",
+  end_date   = "2024-12-31",
+  model      = "ensemble",
+  variable   = "et",
+  interval   = "monthly",
+  units      = "in",
+  api_key    = openet_api_key
+)
+
+orwick_et <- dplyr::left_join(
+  x  = orwick_et,
+  y  = orwick_fields,
+  by = c("field" = "field_id")
+)
+
+orwick_et <- orwick_et |>
+  dplyr::select(-units) |>
+  dplyr::rename(ensemble_et_in = ensemble_et) |>
+  dplyr::mutate(
+    ensemble_et_ft = ensemble_et_in / 12,
+    ensemble_et_af = ensemble_et_ft * acres
+  )
+```
+
+```{r message = FALSE}
+orwick_et_annual_field <- orwick_et |>
+  dplyr::group_by(field, year) |>
+  dplyr::summarize(ensemble_et_af = sum(ensemble_et_af))
+
+orwick_et_monthly_summary <- orwick_et |>
+  dplyr::group_by(year, month) |>
+  dplyr::summarize(ensemble_et_af = sum(ensemble_et_af))
+
+orwick_et_annual_summary <- orwick_et_annual_field |>
+  dplyr::group_by(year) |> 
+  dplyr::summarize(ensemble_et_af = sum(ensemble_et_af))
+
+orwick_et_annual_summary
+```
+
+Here are plots of evapotranspiration from 2016 through 2024.
+
+```{r}
+ggplot(
+  data = orwick_et_annual_field,
+  aes(x = year, y = ensemble_et_af, fill = field)
+) +
+  geom_col() +
+  scale_x_continuous(breaks = seq(from = 2015, to = 2024, by = 1)) +
+  scale_y_continuous(breaks = seq(from = 0, to = 3000, by = 500)) +
+  labs(
+    x     = "year",
+    y     = "evapotranspiration\n(acre-feet)",
+    fill  = "field",
+    title = "Orwick annual evapotranspiration by field"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title       = element_text(face = "bold", margin = margin(b = 20)),
+    axis.title.x     = element_text(margin = margin(t = 10)),
+    axis.title.y     = element_text(margin = margin(r = 10)),
+    panel.grid.minor = element_blank()
+  )
+```
+
+```{r}
+ggplot(
+  data = orwick_et_monthly_summary,
+  aes(x = month, y = ensemble_et_af, color = as.factor(year))
+) +
+  geom_line() +
+  scale_x_continuous(breaks = seq(from = 1, to = 12, by = 1)) +
+  scale_y_continuous(breaks = seq(from = 0, to = 400, by = 50)) +
+  expand_limits(y = 0) +
+  labs(
+    x     = "month",
+    y     = "evapotranspiration\n(acre-feet)",
+    color = "year",
+    title = "Orwick evapotranspiration by month"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title       = element_text(face = "bold", margin = margin(b = 20)),
+    axis.title.x     = element_text(margin = margin(t = 10)),
+    axis.title.y     = element_text(margin = margin(r = 10)),
+    panel.grid.minor = element_blank()
+  )
+```
